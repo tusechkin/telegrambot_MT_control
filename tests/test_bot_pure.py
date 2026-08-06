@@ -1,8 +1,83 @@
 """Юніт-тести чистих/легко-мокованих функцій bot.py (без реального роутера)."""
 
+import asyncio
 import logging
+from unittest.mock import AsyncMock, MagicMock
 
 import bot
+
+
+# ----------------------- known_user (невідомому показуємо його id) -----------------------
+
+UNKNOWN_UID = 999999999  # свідомо відсутній у access.json репозиторію (той самий, що й у test_config.py)
+
+
+def test_known_user_shows_id_to_unknown_user_via_message():
+    @bot.known_user
+    async def handler(update, context):
+        raise AssertionError("хендлер не мав викликатись для невідомого користувача")
+
+    update = MagicMock()
+    update.effective_user.id = UNKNOWN_UID
+    update.message.reply_text = AsyncMock()
+    update.callback_query = None
+
+    asyncio.run(handler(update, None))
+
+    update.message.reply_text.assert_awaited_once()
+    (text,), _ = update.message.reply_text.call_args
+    assert "Доступ заборонено" in text
+    assert str(UNKNOWN_UID) in text
+
+
+def test_known_user_shows_id_to_unknown_user_via_callback():
+    @bot.known_user
+    async def handler(update, context):
+        raise AssertionError("хендлер не мав викликатись для невідомого користувача")
+
+    update = MagicMock()
+    update.effective_user.id = UNKNOWN_UID
+    update.message = None
+    update.callback_query.answer = AsyncMock()
+
+    asyncio.run(handler(update, None))
+
+    update.callback_query.answer.assert_awaited_once()
+    args, kwargs = update.callback_query.answer.call_args
+    assert str(UNKNOWN_UID) in args[0]
+    assert kwargs.get("show_alert") is True
+
+
+def test_known_user_omits_id_line_when_effective_user_missing():
+    @bot.known_user
+    async def handler(update, context):
+        raise AssertionError("хендлер не мав викликатись без effective_user")
+
+    update = MagicMock()
+    update.effective_user = None
+    update.message.reply_text = AsyncMock()
+    update.callback_query = None
+
+    asyncio.run(handler(update, None))
+
+    (text,), _ = update.message.reply_text.call_args
+    assert "Доступ заборонено" in text
+    assert "None" not in text
+
+
+def test_known_user_calls_through_for_known_id():
+    called = {}
+
+    @bot.known_user
+    async def handler(update, context):
+        called["yes"] = True
+
+    update = MagicMock()
+    update.effective_user.id = 111111111  # Admin з access.json репозиторію
+
+    asyncio.run(handler(update, None))
+
+    assert called.get("yes") is True
 
 
 # ----------------------- Логування (BOT_TOKEN не має осідати в journald) -----------------------

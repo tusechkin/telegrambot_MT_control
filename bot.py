@@ -266,10 +266,16 @@ def known_user(func):
         uid = update.effective_user.id if update.effective_user else None
         if uid not in config.ACCESS:
             log.warning("ВІДМОВА (невідомий): user_id=%s → %s", uid, func.__name__)
+            msg = "⛔ Доступ заборонено."
+            if uid is not None:
+                # Даємо користувачу власний id, щоб було що передати адміну для
+                # додавання в access.json — без цього єдиний спосіб дізнатись id
+                # був би окремий бот на кшталт @userinfobot.
+                msg += f"\nТвій id: {uid} — повідом адміністратору для доступу."
             if update.message:
-                await update.message.reply_text("⛔ Доступ заборонено.")
+                await update.message.reply_text(msg)
             elif update.callback_query:
-                await update.callback_query.answer("⛔ Доступ заборонено.", show_alert=True)
+                await update.callback_query.answer(msg, show_alert=True)
             return
         return await func(update, context)
     return wrapper
