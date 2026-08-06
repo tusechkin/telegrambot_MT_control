@@ -1,18 +1,21 @@
 """Тести config.py на реальних targets.json/access.json репозиторію
 (Admin=111111111 з "*", Duty Operator=222222222 з обмеженим доступом
-до цілі "srv-crm") — фіксують контракт allowed()/visible_targets()."""
+до цілі "ccm-sales"; друга ціль "ccm-ret" видима лише Admin) — фіксують
+контракт allowed()/visible_targets()."""
 
 
 def test_allowed_admin_has_wildcard(real_config):
     assert real_config.allowed(111111111, "wg_off") is True
-    assert real_config.allowed(111111111, "block", "srv-crm") is True
+    assert real_config.allowed(111111111, "block", "ccm-sales") is True
+    assert real_config.allowed(111111111, "block", "ccm-ret") is True
 
 
 def test_allowed_operator_scoped_to_target(real_config):
     assert real_config.allowed(222222222, "kick") is True  # kick дозволено без скоупу
-    assert real_config.allowed(222222222, "block", "srv-crm") is True
-    assert real_config.allowed(222222222, "unblock", "srv-crm") is True
+    assert real_config.allowed(222222222, "block", "ccm-sales") is True
+    assert real_config.allowed(222222222, "unblock", "ccm-sales") is True
     assert real_config.allowed(222222222, "wg_off") is False  # не видано
+    assert real_config.allowed(222222222, "block", "ccm-ret") is False  # немає скоупу на другу ціль
     assert real_config.allowed(222222222, "block", "other-target") is False
 
 
@@ -21,7 +24,8 @@ def test_allowed_unknown_user_denied(real_config):
 
 
 def test_visible_targets(real_config):
-    assert real_config.visible_targets(111111111, "block") == ["srv-crm"]
+    assert real_config.visible_targets(111111111, "block") == ["ccm-sales", "ccm-ret"]
+    assert real_config.visible_targets(222222222, "block") == ["ccm-sales"]
     assert real_config.visible_targets(999999999, "status") == []
 
 
