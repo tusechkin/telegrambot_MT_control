@@ -1,12 +1,7 @@
 {
-  "ccm-sales": {
+  "srv-crm": {
     "address": "192.168.72.27",
     "rule": "EMERGENCY-BLOCK-SRV",
-    "descr": "CCM-Sales"
-  },
-  "ccm-ret": {
-    "address": "192.168.72.28",
-    "rule": "EMERGENCY-BLOCK-RET",
-    "descr": "CCM-Ret"
+    "descr": "CRM-сервер (Windows)"
   }
 }
