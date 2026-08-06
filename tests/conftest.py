@@ -38,17 +38,32 @@ def _stub_telegram():
     class Update:
         ALL_TYPES = "ALL_TYPES"
 
+    # Кнопкові класи зберігають передані значення — тести перевіряють саме
+    # вміст згенерованих клавіатур (підписи, callback_data), а не лише факт
+    # виклику.
     class InlineKeyboardButton:
-        def __init__(self, *a, **k):
-            pass
+        def __init__(self, text=None, callback_data=None, **k):
+            self.text = text
+            self.callback_data = callback_data
 
     class InlineKeyboardMarkup:
-        def __init__(self, *a, **k):
-            pass
+        def __init__(self, inline_keyboard=None, **k):
+            self.inline_keyboard = inline_keyboard
+
+    class KeyboardButton:
+        def __init__(self, text=None, **k):
+            self.text = text
+
+    class ReplyKeyboardMarkup:
+        def __init__(self, keyboard=None, **k):
+            self.keyboard = keyboard
+            self.options = k
 
     tg.Update = Update
     tg.InlineKeyboardButton = InlineKeyboardButton
     tg.InlineKeyboardMarkup = InlineKeyboardMarkup
+    tg.KeyboardButton = KeyboardButton
+    tg.ReplyKeyboardMarkup = ReplyKeyboardMarkup
     sys.modules["telegram"] = tg
 
     tg_ext = types.ModuleType("telegram.ext")
@@ -66,10 +81,29 @@ def _stub_telegram():
         def __init__(self, *a, **k):
             pass
 
+    class MessageHandler:
+        def __init__(self, *a, **k):
+            pass
+
+    class _Filter:
+        """Заглушка filters.TEXT/COMMAND: підтримує лише & і ~, як у bot.main()."""
+        def __and__(self, other):
+            return self
+
+        def __invert__(self):
+            return self
+
+    _filters = types.ModuleType("telegram.ext.filters")
+    _filters.TEXT = _Filter()
+    _filters.COMMAND = _Filter()
+
     tg_ext.Application = Application
     tg_ext.CommandHandler = CommandHandler
     tg_ext.CallbackQueryHandler = CallbackQueryHandler
+    tg_ext.MessageHandler = MessageHandler
+    tg_ext.filters = _filters
     sys.modules["telegram.ext"] = tg_ext
+    sys.modules["telegram.ext.filters"] = _filters
 
 
 _stub_librouteros()

@@ -32,8 +32,13 @@ from config import (
 )
 
 from librouteros import connect
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler
+from telegram import (
+    Update, InlineKeyboardButton, InlineKeyboardMarkup,
+    KeyboardButton, ReplyKeyboardMarkup,
+)
+from telegram.ext import (
+    Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters,
+)
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)s %(message)s",
@@ -229,33 +234,44 @@ class Action:
     per_target: bool          # дія стосується конкретної цілі з targets.json
     confirm: Optional[str]    # текст підтвердження; {t} = опис цілі
     run: Optional[Callable]   # виконавець (tname|None) -> (ok, text); None = спецобробник
+    btn: str                  # підпис кнопки в меню (має бути унікальним — див. BTN_TO_KEY)
 
 
 ACTIONS = {
     "status": Action(
         "status", "/status — стан цілей і WireGuard",
-        False, None, None),
+        False, None, None,
+        "📊 Статус"),
     "kick": Action(
         "kick", "/kick <ціль> — розірвати активні сесії (без блокування)",
         True, "⚡ Розірвати активні сесії до {t}? Нові підключення лишаться дозволені.",
-        do_kick),
+        do_kick,
+        "⚡ Розірвати сесії"),
     "block": Action(
         "block", "/block <ціль> — заблокувати доступ + розірвати сесії",
         True, "❗ Заблокувати доступ до {t} і розірвати всі активні сесії?",
-        do_block),
+        do_block,
+        "🔴 Заблокувати"),
     "unblock": Action(
         "unblock", "/unblock <ціль> — відновити доступ",
         True, "Відновити доступ до {t}?",
-        do_unblock),
+        do_unblock,
+        "🟢 Розблокувати"),
     "wg_off": Action(
         "wg_off", "/wg_off — вимкнути ВЕСЬ WireGuard",
         False, "❗❗ Вимкнути ВЕСЬ WireGuard (усі користувачі втратять VPN)?",
-        lambda _t: do_wg(True)),
+        lambda _t: do_wg(True),
+        "⛔ WireGuard OFF"),
     "wg_on": Action(
         "wg_on", "/wg_on — увімкнути WireGuard",
         False, "Увімкнути WireGuard назад?",
-        lambda _t: do_wg(False)),
+        lambda _t: do_wg(False),
+        "✅ WireGuard ON"),
 }
+
+# Зворотний маппінг «підпис кнопки → дія»: кнопки reply-клавіатури надсилаються
+# як звичайний текст, тож саме за ним і впізнаємо, яку дію запускати.
+BTN_TO_KEY = {act.btn: key for key, act in ACTIONS.items()}
 
 
 # ----------------------- Авторизація та UI -----------------------
@@ -307,45 +323,70 @@ async def _ask_confirm(message, key, tname):
                              reply_markup=_confirm_kb(key, tname))
 
 
+# ----------------------- Меню -----------------------
+def _visible_actions(uid):
+    """Дії, доступні користувачу: пряме право на дію або хоч одна дозволена ціль."""
+    return [(key, act) for key, act in ACTIONS.items()
+            if config.allowed(uid, key) or (act.per_target and config.visible_targets(uid, key))]
+
+
+def _menu_kb(uid):
+    """Постійна клавіатура під полем вводу — по кнопці на кожну доступну дію.
+    Оператору з одним правом (напр. лише "block:ccm-sales") видно рівно одну
+    кнопку: натиснув → підтвердив → готово, жодних команд і назв цілей вручну.
+    None, якщо користувачу не доступно нічого (клавіатуру не показуємо)."""
+    rows = [[KeyboardButton(act.btn)] for _key, act in _visible_actions(uid)]
+    if not rows:
+        return None
+    return ReplyKeyboardMarkup(rows, resize_keyboard=True, is_persistent=True,
+                               selective=True)
+
+
 # ----------------------- Команди -----------------------
+async def _start_action(update, context, key, args=()):
+    """Спільний вхід у дію — і з команди (/block ccm-sales), і з кнопки меню.
+    Кнопка просто не передає args, тож іде гілкою вибору цілі."""
+    uid = update.effective_user.id
+    act = ACTIONS[key]
+
+    if not act.per_target:
+        if not config.allowed(uid, key):
+            return await _deny(update, uid, key)
+        await update.message.reply_text(
+            act.confirm, reply_markup=_confirm_kb(key, "-"))
+        return
+
+    avail = config.visible_targets(uid, key)
+    if not avail:
+        return await _deny(update, uid, key)
+
+    if args:
+        tname = args[0]
+        if tname not in TARGETS:
+            await update.message.reply_text(
+                f"Невідома ціль '{tname}'. Доступні: {', '.join(avail)}")
+            return
+        if not config.allowed(uid, key, tname):
+            return await _deny(update, uid, key, tname)
+        await _ask_confirm(update.message, key, tname)
+    elif len(avail) == 1:
+        # єдина доступна ціль — не змушуємо вводити її ім'я
+        await _ask_confirm(update.message, key, avail[0])
+    else:
+        kb = InlineKeyboardMarkup(
+            [[InlineKeyboardButton(f"{TARGETS[n]['descr']} [{n}]",
+                                   callback_data=f"ask:{key}:{n}")]
+             for n in avail]
+            + [[InlineKeyboardButton("❌ Скасувати", callback_data="cancel")]])
+        await update.message.reply_text("Оберіть ціль:", reply_markup=kb)
+
+
 def make_cmd(key):
     """Фабрика обробника команди для дії з реєстру."""
     @known_user
     async def cmd(update, context):
-        uid = update.effective_user.id
-        act = ACTIONS[key]
-
-        if not act.per_target:
-            if not config.allowed(uid, key):
-                return await _deny(update, uid, key)
-            await update.message.reply_text(
-                act.confirm, reply_markup=_confirm_kb(key, "-"))
-            return
-
-        avail = config.visible_targets(uid, key)
-        if not avail:
-            return await _deny(update, uid, key)
-
-        args = getattr(context, "args", None) or []
-        if args:
-            tname = args[0]
-            if tname not in TARGETS:
-                await update.message.reply_text(
-                    f"Невідома ціль '{tname}'. Доступні: {', '.join(avail)}")
-                return
-            if not config.allowed(uid, key, tname):
-                return await _deny(update, uid, key, tname)
-            await _ask_confirm(update.message, key, tname)
-        elif len(avail) == 1:
-            # єдина доступна ціль — не змушуємо вводити її ім'я
-            await _ask_confirm(update.message, key, avail[0])
-        else:
-            kb = InlineKeyboardMarkup(
-                [[InlineKeyboardButton(f"{TARGETS[n]['descr']} [{n}]",
-                                       callback_data=f"ask:{key}:{n}")]
-                 for n in avail]
-                + [[InlineKeyboardButton("❌ Скасувати", callback_data="cancel")]])
-            await update.message.reply_text("Оберіть ціль:", reply_markup=kb)
+        await _start_action(update, context, key,
+                            getattr(context, "args", None) or [])
     return cmd
 
 
@@ -353,19 +394,17 @@ def make_cmd(key):
 async def cmd_start(update, context):
     uid = update.effective_user.id
     lines = ["Аварійне керування доступом. Ваші доступні дії:"]
-    for key, act in ACTIONS.items():
-        if config.allowed(uid, key) or (act.per_target and config.visible_targets(uid, key)):
-            lines.append(act.menu)
+    for _key, act in _visible_actions(uid):
+        lines.append(act.menu)
     tnames = [n for n in TARGETS
               if any(config.allowed(uid, k, n)
                      for k, a in ACTIONS.items() if a.per_target)]
     if tnames:
         lines.append("\nЦілі: " + ", ".join(f"{n} — {TARGETS[n]['descr']}" for n in tnames))
-    await update.message.reply_text("\n".join(lines))
+    await update.message.reply_text("\n".join(lines), reply_markup=_menu_kb(uid))
 
 
-@known_user
-async def cmd_status(update, context):
+async def _send_status(update, context):
     uid = update.effective_user.id
     if not (config.allowed(uid, "status") or config.visible_targets(uid, "status")):
         return await _deny(update, uid, "status")
@@ -374,6 +413,27 @@ async def cmd_status(update, context):
     except Exception:
         log.exception("status")
         await update.message.reply_text(ERR_TXT)
+
+
+@known_user
+async def cmd_status(update, context):
+    await _send_status(update, context)
+
+
+@known_user
+async def on_text(update, context):
+    """Натискання кнопки меню приходить звичайним текстовим повідомленням."""
+    key = BTN_TO_KEY.get((update.message.text or "").strip())
+    if key is None:
+        # Не наша кнопка. У приватному чаті підкажемо, у групі — мовчимо,
+        # щоб бот не реагував на звичайне листування.
+        chat = update.effective_chat
+        if chat is not None and chat.type == "private":
+            await update.message.reply_text("Не розпізнав. Скористайся кнопками або /start.")
+        return
+    if key == "status":  # спецобробник, не має run у реєстрі
+        return await _send_status(update, context)
+    await _start_action(update, context, key)
 
 
 async def _notify_group(context, target, actor_uid, key, txt):
@@ -472,6 +532,9 @@ def main():
         if act.run is not None:  # спецобробники (status) зареєстровані вище
             app.add_handler(CommandHandler(key, make_cmd(key)))
     app.add_handler(CallbackQueryHandler(on_callback))
+    # Останнім: кнопки меню надходять як звичайний текст, тож ловимо все, що
+    # не є командою (команди вже розібрані обробниками вище).
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
     log.info("Бот запущено. Цілі: %s; користувачів: %d",
              ", ".join(TARGETS) or "-", len(config.ACCESS))
     app.run_polling(allowed_updates=Update.ALL_TYPES)

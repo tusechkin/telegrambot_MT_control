@@ -335,3 +335,100 @@ def test_notify_group_one_failure_does_not_stop_the_rest(monkeypatch):
     asyncio.run(bot._notify_group(FakeContext(fb), "ccm-sales", 999, "block", "🔴 ЗАБЛОКОВАНО"))
 
     assert {cid for cid, _ in fb.sent} == {111, 333}
+
+
+# ----------------------- Меню / кнопки -----------------------
+
+def test_every_action_has_a_unique_button_label():
+    """BTN_TO_KEY розрізняє дії саме за підписом кнопки — дублікат зробив би
+    одну з дій недосяжною з меню (натиснув 'Заблокувати', виконалось інше)."""
+    labels = [act.btn for act in bot.ACTIONS.values()]
+    assert all(labels)
+    assert len(set(labels)) == len(labels)
+    assert bot.BTN_TO_KEY == {act.btn: key for key, act in bot.ACTIONS.items()}
+
+
+def test_menu_kb_shows_only_permitted_actions(monkeypatch):
+    """Оператор із єдиним правом бачить рівно одну кнопку — це і є сценарій
+    «дати користувачу 1-2 кнопки замість команд»."""
+    monkeypatch.setattr(bot.config, "allowed",
+                        lambda uid, key, target=None: key == "block")
+    monkeypatch.setattr(bot.config, "visible_targets",
+                        lambda uid, key: ["ccm-sales"] if key == "block" else [])
+
+    kb = bot._menu_kb(1)
+    labels = [b.text for row in kb.keyboard for b in row]
+    assert labels == [bot.ACTIONS["block"].btn]
+
+
+def test_menu_kb_is_none_when_user_has_no_actions(monkeypatch):
+    monkeypatch.setattr(bot.config, "allowed", lambda uid, key, target=None: False)
+    monkeypatch.setattr(bot.config, "visible_targets", lambda uid, key: [])
+    assert bot._menu_kb(1) is None
+
+
+def test_on_text_button_starts_the_matching_action(monkeypatch):
+    started = {}
+
+    async def fake_start_action(update, context, key, args=()):
+        started["key"] = key
+        started["args"] = args
+
+    monkeypatch.setattr(bot, "_start_action", fake_start_action)
+
+    update = MagicMock()
+    update.effective_user.id = 111111111  # Admin з access.json репозиторію
+    update.message.text = bot.ACTIONS["block"].btn
+
+    asyncio.run(bot.on_text(update, None))
+
+    assert started["key"] == "block"
+    assert not started["args"]  # без args → гілка вибору цілі
+
+
+def test_on_text_status_button_routes_to_status_handler(monkeypatch):
+    """status не має run у реєстрі — кнопка мусить іти в _send_status,
+    а не в загальний _start_action (інакше AttributeError на act.run)."""
+    called = {}
+
+    async def fake_send_status(update, context):
+        called["yes"] = True
+
+    async def fail_start_action(update, context, key, args=()):
+        raise AssertionError("status не має йти через _start_action")
+
+    monkeypatch.setattr(bot, "_send_status", fake_send_status)
+    monkeypatch.setattr(bot, "_start_action", fail_start_action)
+
+    update = MagicMock()
+    update.effective_user.id = 111111111
+    update.message.text = bot.ACTIONS["status"].btn
+
+    asyncio.run(bot.on_text(update, None))
+
+    assert called.get("yes") is True
+
+
+def test_on_text_unknown_text_hints_in_private_chat(monkeypatch):
+    update = MagicMock()
+    update.effective_user.id = 111111111
+    update.message.text = "просто балачки"
+    update.message.reply_text = AsyncMock()
+    update.effective_chat.type = "private"
+
+    asyncio.run(bot.on_text(update, None))
+
+    update.message.reply_text.assert_awaited_once()
+
+
+def test_on_text_unknown_text_is_silent_in_group_chat(monkeypatch):
+    """У групі бот не має відповідати на звичайне листування."""
+    update = MagicMock()
+    update.effective_user.id = 111111111
+    update.message.text = "просто балачки"
+    update.message.reply_text = AsyncMock()
+    update.effective_chat.type = "supergroup"
+
+    asyncio.run(bot.on_text(update, None))
+
+    update.message.reply_text.assert_not_awaited()
