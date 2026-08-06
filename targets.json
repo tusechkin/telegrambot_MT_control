@@ -1,0 +1,8 @@
+{
+  "srv-crm": {
+    "address": "192.168.72.27",
+    "rule": "EMERGENCY-BLOCK-SRV",
+    "src": "10.10.0.0/24",
+    "descr": "CRM-сервер (Windows)"
+  }
+}
