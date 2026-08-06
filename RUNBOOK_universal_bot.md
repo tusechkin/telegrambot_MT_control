@@ -285,6 +285,11 @@ pct create 200 local:vztmpl/debian-12-standard_12.7-1_amd64.tar.zst \
 pct start 200
 ```
 
+> Якщо в 0.4 п.4 заводив статичний DHCP-lease за MAC (замість статичної адреси в
+> контейнері) — заміни рядок `--net0` на `--net0 name=eth0,bridge=<bridge>,hwaddr=<LXC_MAC>,ip=dhcp`
+> (без `gw=` — його видасть DHCP) і **пропусти `--nameserver`**, якщо теж хочеш отримати
+> DNS через DHCP.
+
 ### 2.3 Досяжність роутера
 ```
 pct exec 200 -- bash -lc 'apt-get update -qq && apt-get install -y -qq iproute2 iputils-ping >/dev/null; ping -c2 <CHR_IP>'

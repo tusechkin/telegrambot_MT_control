@@ -1,6 +1,18 @@
 """Юніт-тести чистих/легко-мокованих функцій bot.py (без реального роутера)."""
 
+import logging
+
 import bot
+
+
+# ----------------------- Логування (BOT_TOKEN не має осідати в journald) -----------------------
+
+def test_httpx_logging_suppressed_to_avoid_leaking_bot_token():
+    """httpx/httpcore на INFO логують повний URL запиту до Bot API, включно з
+    BOT_TOKEN відкритим текстом. Регресійний тест на реальний інцидент (токен
+    осів у journald і потрапив у чат) — ці логери мають лишатись притишеними."""
+    assert logging.getLogger("httpx").level >= logging.WARNING
+    assert logging.getLogger("httpcore").level >= logging.WARNING
 
 
 # ----------------------- _is_disabled -----------------------
