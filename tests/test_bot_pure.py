@@ -149,3 +149,50 @@ def test_actions_registry_internal_consistency():
             assert callable(act.run)
         else:
             assert act.run is None
+
+
+# ----------------------- _wg_find (стійкість до різних роутерів) -----------------------
+
+class RaisingPath:
+    """Двійник Path, що імітує TrapError від librouteros — напр. коли на роутері
+    взагалі немає підтримки WireGuard (не той пакет/версія RouterOS). Ітерація
+    одразу кидає виняток, а не повертає порожній список."""
+
+    def __iter__(self):
+        raise RuntimeError("no such command (симуляція TrapError)")
+
+
+class WgOnlyApi:
+    """Мінімальний двійник api, що вміє лише interface/wireguard — для ізольованих
+    тестів _wg_find без FakeApi.path()'s AssertionError на невідомих шляхах."""
+
+    def __init__(self, wg_path):
+        self._wg_path = wg_path
+
+    def path(self, *parts):
+        assert parts == ("interface", "wireguard")
+        return self._wg_path
+
+
+def test_wg_find_returns_matching_interface(monkeypatch):
+    monkeypatch.setattr(bot, "WG_IFACE", "wg0")
+    api = WgOnlyApi(FakePath([
+        {".id": "*1", "name": "wg0", "disabled": "false"},
+        {".id": "*2", "name": "wg-other", "disabled": "true"},
+    ]))
+    found = bot._wg_find(api)
+    assert found[".id"] == "*1"
+
+
+def test_wg_find_returns_none_when_name_not_found(monkeypatch):
+    monkeypatch.setattr(bot, "WG_IFACE", "wg0")
+    api = WgOnlyApi(FakePath([{".id": "*1", "name": "wg-other", "disabled": "false"}]))
+    assert bot._wg_find(api) is None
+
+
+def test_wg_find_returns_none_instead_of_raising_when_router_has_no_wireguard(monkeypatch):
+    """Ключова гарантія універсальності: роутер без підтримки WireGuard не валить
+    команду (і не має валити решту /status для інших цілей)."""
+    monkeypatch.setattr(bot, "WG_IFACE", "wg0")
+    api = WgOnlyApi(RaisingPath())
+    assert bot._wg_find(api) is None

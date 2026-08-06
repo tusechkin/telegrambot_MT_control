@@ -156,6 +156,18 @@ if _raw is not None:
     if not TARGETS:
         _errors.append("TARGETS: жодної коректної цілі — боту нічим керувати")
 
+    # Один і той самий firewall-коментар (rule) у двох цілей — це не помилка
+    # синтаксису, а пастка, що спливе тільки в бою: /block однієї цілі мовчки
+    # перемкне правило іншої (обидві резолвляться в один рядок на роутері).
+    _rule_owner = {}
+    for _name, _t in TARGETS.items():
+        _dup = _rule_owner.get(_t["rule"])
+        if _dup is not None:
+            _errors.append(f"TARGETS: цілі {_dup!r} і {_name!r} мають однаковий "
+                           f"'rule' {_t['rule']!r} — /block однієї зачепить правило іншої")
+        else:
+            _rule_owner[_t["rule"]] = _name
+
 
 # ===================== ПРАВА (access.json) =====================
 
