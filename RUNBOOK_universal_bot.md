@@ -374,6 +374,13 @@ EnvironmentFile=/opt/tgbot/tgbot.env
 ExecStart=/opt/tgbot/venv/bin/python /opt/tgbot/bot.py
 Restart=always
 RestartSec=5
+# python-telegram-bot v21 (run_polling) на SIGTERM час від часу лишає
+# _update_fetcher-таск нескасованим до закриття event loop → процес виходить
+# з кодом 1 замість 0 (видно в journalctl: "RuntimeError: Event loop is closed").
+# Це не збій застосунку — config.validate() сигналізує реальні помилки конфігу
+# окремим кодом exit(2), який SuccessExitStatus нижче не чіпає. Без цього рядка
+# щоразовий restart/stop зайво "з'їдає" слот StartLimitBurst.
+SuccessExitStatus=1
 User=root
 
 [Install]
