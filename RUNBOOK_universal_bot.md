@@ -163,13 +163,27 @@ disable api
 ```
 
 ### 1.3 Обмежений користувач
+
+> **Перед виконанням — звір список політик зі своєю версією RouterOS.** Набір валідних
+> токенів `policy` відрізняється між версіями (напр. на RouterOS 7.23 політики `dude` вже
+> немає — пакет прибрали з переліку, хоча в старіших збірках вона є). Один невалідний
+> токен валить всю команду одразу з малоінформативним `input does not match any value of
+> policy` (без вказівки, який саме). Перевір актуальний набір перед копіюванням команди:
+> ```
+> /user group print detail where name=full
+> ```
+> Це вбудована група з усіма політиками — звір її список зі шаблоном нижче й прибери
+> токени, яких на твоїй версії нема (або додай нові, якщо з'явились).
+
 ```
 /user group
-add name=botctl policy=api,read,write,test,!ftp,!local,!telnet,!ssh,!reboot,!policy,!password,!web,!winbox,!sniff,!sensitive,!romon,!dude,!rest-api
+add name=botctl policy=api,read,write,test,!ftp,!local,!telnet,!ssh,!reboot,!policy,!password,!web,!winbox,!sniff,!sensitive,!romon,!rest-api
 /user
 add name=tgbot group=botctl password=<STRONG_PASS> address=<LXC_IP>/32 comment="Emergency TG bot"
 ```
-> `write` покриває і перемикання правил, і видалення conntrack-записів (kick).
+> `write` покриває і перемикання правил, і видалення conntrack-записів (kick). Шаблон вище
+> перевірено на RouterOS 7.23 (без `dude`); якщо на твоїй версії `full` містить `dude` —
+> додай і `!dude` теж (шкоди не буде, зайвий explicit-deny).
 
 ### 1.4 Вимкнені drop-правила — по одному на кожну ціль
 Для кожної цілі з майбутнього `targets.json` (коментар правила = поле `rule` цілі):
