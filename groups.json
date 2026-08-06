@@ -1,0 +1,11 @@
+{
+  "roles": {
+    "duty": ["status", "kick", "block:sales-dept", "unblock:sales-dept"]
+  },
+  "target_groups": {
+    "sales-dept": ["srv-crm"]
+  },
+  "notify_groups": {
+    "sales-notify": [111111111]
+  }
+}

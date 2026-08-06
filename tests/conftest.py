@@ -86,5 +86,6 @@ def real_config(monkeypatch):
     monkeypatch.setenv("CHR_PASS", "test-pass")
     monkeypatch.setenv("TARGETS_FILE", str(REPO_ROOT / "targets.json"))
     monkeypatch.setenv("ACCESS_FILE", str(REPO_ROOT / "access.json"))
+    monkeypatch.setenv("GROUPS_FILE", str(REPO_ROOT / "groups.json"))
     import config
     return importlib.reload(config)

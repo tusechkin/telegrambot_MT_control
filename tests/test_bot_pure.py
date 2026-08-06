@@ -283,3 +283,55 @@ def test_wg_find_returns_none_instead_of_raising_when_router_has_no_wireguard(mo
     monkeypatch.setattr(bot, "WG_IFACE", "wg0")
     api = WgOnlyApi(RaisingPath())
     assert bot._wg_find(api) is None
+
+
+# ----------------------- _notify_group -----------------------
+
+class FakeBot:
+    def __init__(self, fail_for=frozenset()):
+        self.sent = []
+        self._fail_for = fail_for
+
+    async def send_message(self, chat_id, text):
+        if chat_id in self._fail_for:
+            raise RuntimeError("simulated Telegram API error")
+        self.sent.append((chat_id, text))
+
+
+class FakeContext:
+    def __init__(self, fake_bot):
+        self.bot = fake_bot
+
+
+def test_notify_group_sends_to_all_recipients(monkeypatch):
+    monkeypatch.setattr(bot, "TARGETS", {"ccm-sales": {"descr": "CCM-Sales"}})
+    monkeypatch.setattr(bot.config, "notify_recipients", lambda target, actor: [111, 222])
+    monkeypatch.setattr(bot.config, "user_name", lambda uid: "Іван")
+
+    fb = FakeBot()
+    asyncio.run(bot._notify_group(FakeContext(fb), "ccm-sales", 999, "block", "🔴 ЗАБЛОКОВАНО"))
+
+    assert {cid for cid, _ in fb.sent} == {111, 222}
+    for _, text in fb.sent:
+        assert "Іван" in text and "CCM-Sales" in text and "block" in text
+
+
+def test_notify_group_no_recipients_sends_nothing(monkeypatch):
+    monkeypatch.setattr(bot, "TARGETS", {"ccm-sales": {"descr": "CCM-Sales"}})
+    monkeypatch.setattr(bot.config, "notify_recipients", lambda target, actor: [])
+
+    fb = FakeBot()
+    asyncio.run(bot._notify_group(FakeContext(fb), "ccm-sales", 999, "block", "🔴 ЗАБЛОКОВАНО"))
+
+    assert fb.sent == []
+
+
+def test_notify_group_one_failure_does_not_stop_the_rest(monkeypatch):
+    monkeypatch.setattr(bot, "TARGETS", {"ccm-sales": {"descr": "CCM-Sales"}})
+    monkeypatch.setattr(bot.config, "notify_recipients", lambda target, actor: [111, 222, 333])
+    monkeypatch.setattr(bot.config, "user_name", lambda uid: "Іван")
+
+    fb = FakeBot(fail_for={222})
+    asyncio.run(bot._notify_group(FakeContext(fb), "ccm-sales", 999, "block", "🔴 ЗАБЛОКОВАНО"))
+
+    assert {cid for cid, _ in fb.sent} == {111, 333}

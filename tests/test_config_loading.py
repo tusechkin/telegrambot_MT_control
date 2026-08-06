@@ -22,6 +22,12 @@ def _reload(monkeypatch, tmp_path, targets, access, **extra_env):
     monkeypatch.setenv("CHR_PASS", "p")
     monkeypatch.setenv("TARGETS_FILE", str(targets_file))
     monkeypatch.setenv("ACCESS_FILE", str(access_file))
+    # groups.json опційний і за замовчуванням резолвиться поруч із config.py —
+    # тобто в РЕАЛЬНИЙ groups.json репозиторію. Наводимо на неіснуючий шлях у
+    # tmp_path, щоб тести цього файлу лишались повністю ізольованими (без цього
+    # target_groups із реального groups.json посилалися б на цілі, яких немає
+    # в тестовому targets.json, і псували тести на "немає помилок").
+    monkeypatch.setenv("GROUPS_FILE", str(tmp_path / "groups.json"))
     for k, v in extra_env.items():
         monkeypatch.setenv(k, v)
 
@@ -82,9 +88,10 @@ def test_rejects_non_numeric_access_key(monkeypatch, tmp_path):
 
 
 def test_rejects_empty_actions_list(monkeypatch, tmp_path):
+    """Порожній 'actions' і без 'role' — немає жодного джерела прав."""
     access = {"123": {"name": "A", "actions": []}}
     cfg = _reload(monkeypatch, tmp_path, VALID_TARGETS, access)
-    assert any("порожній/відсутній список" in e for e in cfg._errors)
+    assert any("немає ні 'role', ні 'actions'" in e for e in cfg._errors)
 
 
 def test_no_access_users_at_all_is_an_error(monkeypatch, tmp_path):
@@ -119,6 +126,7 @@ def test_missing_json_files_report_error(monkeypatch, tmp_path):
     monkeypatch.setenv("CHR_PASS", "p")
     monkeypatch.setenv("TARGETS_FILE", str(tmp_path / "no-targets.json"))
     monkeypatch.setenv("ACCESS_FILE", str(tmp_path / "no-access.json"))
+    monkeypatch.setenv("GROUPS_FILE", str(tmp_path / "no-groups.json"))
     cfg = importlib.reload(config_module)
     assert any("файл не знайдено" in e for e in cfg._errors)
 
@@ -135,6 +143,7 @@ def test_malformed_json_reports_error(monkeypatch, tmp_path):
     monkeypatch.setenv("CHR_PASS", "p")
     monkeypatch.setenv("TARGETS_FILE", str(bad_file))
     monkeypatch.setenv("ACCESS_FILE", str(access_file))
+    monkeypatch.setenv("GROUPS_FILE", str(tmp_path / "no-groups.json"))
     cfg = importlib.reload(config_module)
     assert any("зламаний JSON" in e for e in cfg._errors)
 
@@ -168,4 +177,5 @@ def _restore_real_config(monkeypatch):
     monkeypatch.setenv("CHR_PASS", "test-pass")
     monkeypatch.setenv("TARGETS_FILE", str(repo_root / "targets.json"))
     monkeypatch.setenv("ACCESS_FILE", str(repo_root / "access.json"))
+    monkeypatch.delenv("GROUPS_FILE", raising=False)  # → дефолт: реальний groups.json репо
     importlib.reload(config_module)

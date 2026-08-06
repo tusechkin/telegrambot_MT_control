@@ -376,6 +376,22 @@ async def cmd_status(update, context):
         await update.message.reply_text(ERR_TXT)
 
 
+async def _notify_group(context, target, actor_uid, key, txt):
+    """Сповіщає групу отримувачів цілі (targets.json → "notify") про виконану
+    дію. Мовчки нічого не робить, якщо в цілі немає "notify" — це опційна
+    фіча per-target, а не щось увімкнене за замовчуванням для всіх."""
+    ids = config.notify_recipients(target, actor_uid)
+    if not ids:
+        return
+    descr = TARGETS[target]["descr"]
+    text = f"🔔 {config.user_name(actor_uid)} виконав /{key} на {descr} [{target}]:\n{txt}"
+    for nid in ids:
+        try:
+            await context.bot.send_message(chat_id=nid, text=text)
+        except Exception:
+            log.exception("сповіщення: не вдалось надіслати id=%s (ціль=%s)", nid, target)
+
+
 @known_user
 async def on_callback(update, context):
     q = update.callback_query
@@ -434,6 +450,8 @@ async def on_callback(update, context):
         log.info("action=%s target=%s by user=%s (%s): %s",
                  key, tname, uid, config.user_name(uid), txt)
         await q.edit_message_text(txt)
+        if ok and key == "block" and target:
+            await _notify_group(context, target, uid, key, txt)
     except Exception:
         log.exception("callback %s:%s", key, tname)
         await q.edit_message_text(ERR_TXT)
