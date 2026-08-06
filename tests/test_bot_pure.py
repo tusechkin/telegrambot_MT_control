@@ -1,0 +1,151 @@
+"""Юніт-тести чистих/легко-мокованих функцій bot.py (без реального роутера)."""
+
+import bot
+
+
+# ----------------------- _is_disabled -----------------------
+
+def test_is_disabled_truthy_variants():
+    for v in ("true", "True", "TRUE", "yes", "Yes", "1", True):
+        assert bot._is_disabled(v) is True
+
+
+def test_is_disabled_falsy_variants():
+    for v in ("false", "no", "0", "", None, "garbage"):
+        assert bot._is_disabled(v) is False
+
+
+# ----------------------- _conn_ip -----------------------
+
+def test_conn_ip_strips_port():
+    assert bot._conn_ip("10.10.0.5:51820") == "10.10.0.5"
+
+
+def test_conn_ip_without_port():
+    assert bot._conn_ip("10.10.0.5") == "10.10.0.5"
+
+
+def test_conn_ip_handles_missing_value():
+    assert bot._conn_ip(None) == ""
+
+
+# ----------------------- _match_sessions -----------------------
+
+def test_match_sessions_filters_by_dst_and_src_subnet():
+    target = {"address": "192.168.72.27", "src": "10.10.0.0/24"}
+    conns = [
+        {".id": "*1", "dst-address": "192.168.72.27:3389", "src-address": "10.10.0.5:51820"},
+        {".id": "*2", "dst-address": "192.168.72.27:3389", "src-address": "10.10.1.9:51820"},  # інша підмережа
+        {".id": "*3", "dst-address": "192.168.72.99:80", "src-address": "10.10.0.5:51820"},  # інша ціль
+        {".id": "*4", "dst-address": "192.168.72.27", "src-address": "not-an-ip"},  # непарсабельний src
+    ]
+    assert bot._match_sessions(conns, target) == ["*1"]
+
+
+def test_match_sessions_without_src_matches_any_source():
+    target = {"address": "192.168.72.27", "src": None}
+    conns = [
+        {".id": "*1", "dst-address": "192.168.72.27:3389", "src-address": "10.10.0.5:51820"},
+        {".id": "*2", "dst-address": "192.168.72.27:22", "src-address": "203.0.113.9:4444"},
+    ]
+    assert bot._match_sessions(conns, target) == ["*1", "*2"]
+
+
+def test_match_sessions_no_matches_returns_empty_list():
+    target = {"address": "192.168.72.27", "src": None}
+    conns = [{".id": "*1", "dst-address": "10.0.0.1", "src-address": "10.10.0.5"}]
+    assert bot._match_sessions(conns, target) == []
+
+
+# ----------------------- FakeApi для _rules_by_comment/_set_rule/_kick -----------------------
+
+class FakePath:
+    """Мінімальний двійник librouteros Path: ітерація, update(**), remove(*ids)."""
+
+    def __init__(self, rows):
+        self.rows = rows
+
+    def __iter__(self):
+        return iter(self.rows)
+
+    def update(self, **fields):
+        rid = fields[".id"]
+        for row in self.rows:
+            if row[".id"] == rid:
+                row.update(fields)
+                return
+        raise KeyError(rid)
+
+    def remove(self, *ids):
+        ids = set(ids)
+        self.rows[:] = [r for r in self.rows if r[".id"] not in ids]
+
+
+class FakeApi:
+    def __init__(self, filter_rows=None, conn_rows=None, wg_rows=None):
+        self.filter = FakePath(filter_rows or [])
+        self.conn = FakePath(conn_rows or [])
+        self.wg = FakePath(wg_rows or [])
+
+    def path(self, *parts):
+        return {
+            ("ip", "firewall", "filter"): self.filter,
+            ("ip", "firewall", "connection"): self.conn,
+            ("interface", "wireguard"): self.wg,
+        }[parts]
+
+
+def test_rules_by_comment_first_match_wins_and_skips_uncommented():
+    api = FakeApi(filter_rows=[
+        {".id": "*1", "comment": "RULE-A", "disabled": "yes"},
+        {".id": "*2", "comment": "RULE-A", "disabled": "no"},  # дублікат коментаря — ігнорується
+        {".id": "*3", "comment": "RULE-B", "disabled": "no"},
+        {".id": "*4", "disabled": "no"},  # без коментаря
+    ])
+    rules = bot._rules_by_comment(api)
+    assert set(rules) == {"RULE-A", "RULE-B"}
+    assert rules["RULE-A"][".id"] == "*1"
+
+
+def test_set_rule_toggles_disabled_flag():
+    api = FakeApi(filter_rows=[{".id": "*1", "comment": "RULE-A", "disabled": "yes"}])
+    assert bot._set_rule(api, "RULE-A", disabled=False) is True
+    assert api.filter.rows[0]["disabled"] == "no"
+    assert bot._set_rule(api, "RULE-A", disabled=True) is True
+    assert api.filter.rows[0]["disabled"] == "yes"
+
+
+def test_set_rule_missing_comment_returns_false():
+    api = FakeApi(filter_rows=[{".id": "*1", "comment": "RULE-A", "disabled": "yes"}])
+    assert bot._set_rule(api, "NO-SUCH-RULE", disabled=False) is False
+
+
+def test_kick_removes_only_matching_connections_and_counts_them():
+    target = {"address": "192.168.72.27", "src": None}
+    api = FakeApi(conn_rows=[
+        {".id": "*1", "dst-address": "192.168.72.27:3389", "src-address": "10.10.0.5"},
+        {".id": "*2", "dst-address": "192.168.72.99:80", "src-address": "10.10.0.5"},
+    ])
+    kicked = bot._kick(api, target)
+    assert kicked == 1
+    assert [r[".id"] for r in api.conn.rows] == ["*2"]
+
+
+def test_kick_no_matches_returns_zero_without_calling_remove():
+    target = {"address": "192.168.72.27", "src": None}
+    api = FakeApi(conn_rows=[{".id": "*1", "dst-address": "10.0.0.1", "src-address": "10.10.0.5"}])
+    assert bot._kick(api, target) == 0
+    assert len(api.conn.rows) == 1
+
+
+# ----------------------- Реєстр ACTIONS -----------------------
+
+def test_actions_registry_internal_consistency():
+    for key, act in bot.ACTIONS.items():
+        assert act.key == key
+        if act.per_target:
+            assert act.confirm is not None and "{t}" in act.confirm
+        if key != "status":
+            assert callable(act.run)
+        else:
+            assert act.run is None

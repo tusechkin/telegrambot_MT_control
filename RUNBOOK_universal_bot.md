@@ -12,6 +12,7 @@
 | `/block` лише перемикає правило | `/block` = правило **+ авто-розрив сесій** → діє миттєво навіть із FastTrack |
 | — | Нова дія **`/kick`** — миттєвий розрив активних сесій БЕЗ блокування нових |
 | `/block_all`, `/unblock_all` | `/wg_off`, `/wg_on` (те саме, чесніша назва) |
+| FastTrack-виключення по одній `dst-address` (1.4a) | Крок 1.5: `address-list EMG-PROTECTED` — масштабується на всі цілі без правки fasttrack-правила |
 
 **Файли (5):** `bot.py` (двигун + дії), `config.py` (env + валідація), `targets.json` (цілі), `access.json` (права), `tgbot.env` (секрети).
 
@@ -132,7 +133,44 @@ add chain=forward action=drop \
 Друга і наступні цілі — те саме зі своїми `dst-address` і `comment` (напр. `EMG-BLOCK-SRV-FILES`).
 Перевірка: `/ip firewall filter print where comment~"EMERGENCY|EMG-"` — усі з прапором `X`.
 
-> Авто-kick у `/block` уже гарантує миттєву дію правила, тож окреме виключення цілей із FastTrack (v1, крок 1.4a) тепер **опційний захист у глибину** — див. «Опційні покращення». Якщо цілей стане кілька, роби його через address-list, а не по одній адресі.
+> Авто-kick у `/block` уже гарантує миттєву дію правила, тож окреме виключення цілей із FastTrack (v1, крок 1.4a) тепер **опційний захист у глибину** — див. крок 1.5.
+
+### 1.5 Виключити цілі з FastTrack (захист у глибину, опційно)
+
+Мета: щоб з'єднання до цілей із `targets.json` **ніколи** не потрапляли у fast-path і завжди йшли
+через filter-ланцюг. Авто-kick у `/block` уже гарантує миттєвий розрив і без цього кроку — тут
+описано додатковий рубіж на випадок, якщо conntrack не встигне почиститись (напр. перевантажений
+роутер), або в майбутньому з'явиться дія, що блокує без auto-kick.
+
+Перевір наявність FastTrack (зроблено в 0.2):
+```
+/ip firewall filter print where action=fasttrack-connection
+```
+Якщо правило є — заведи address-list з адресами всіх цілей (по одному запису на кожну ціль
+із `targets.json`) і виключи цей список із fast-path:
+```
+/ip firewall address-list
+add list=EMG-PROTECTED address=192.168.72.27 comment="srv-crm"
+# + один рядок на кожну наступну ціль (address з targets.json)
+
+/ip firewall filter
+set [find action=fasttrack-connection chain=forward] dst-address-list=!EMG-PROTECTED
+```
+Перевірка:
+```
+/ip firewall filter print where action=fasttrack-connection
+```
+Навпроти fasttrack-правила має з'явитись `dst-address-list=!EMG-PROTECTED`.
+
+> На відміну від v1 (виключення по одній `dst-address`), тут — список: додавання нової цілі
+> в `targets.json` не вимагає переписувати fasttrack-правило, лише додати рядок в `EMG-PROTECTED`
+> (див. «Розширення → Додати нову ціль»).
+
+**Rollback:**
+```
+/ip firewall filter set [find action=fasttrack-connection chain=forward] !dst-address-list
+/ip firewall address-list remove [find list=EMG-PROTECTED]
+```
 
 ### 1.6 Строге TCP-відстеження — умова ефективності standalone `/kick`
 ```
@@ -381,7 +419,9 @@ add chain=forward action=drop dst-address=192.0.2.1 \
 1. На CHR: вимкнене drop-правило для цілі (як 1.4) зі своїм коментарем.
 2. У `targets.json`: новий блок (`address`, `rule`, за потреби `src`, `descr`).
 3. В `access.json`: роздати права (`"block:нова-ціль"` кому треба; у кого `"*"` чи безскоупні дії — вже мають).
-4. `systemctl restart tgbot` → NOOP-подібний тест нової цілі (Фаза 4a за аналогією).
+4. Якщо використовуєш 1.5 (FastTrack address-list) — додай адресу нової цілі в `EMG-PROTECTED`:
+   `/ip firewall address-list add list=EMG-PROTECTED address=<нова-адреса> comment="<нова-ціль>"`.
+5. `systemctl restart tgbot` → NOOP-подібний тест нової цілі (Фаза 4a за аналогією).
 
 **Код не змінюється.**
 
@@ -505,7 +545,6 @@ systemctl start tgbot && /opt/tgbot/heartbeat.sh --daily   # → ✅
 
 ## Опційні покращення (на потім)
 
-- **Виключення цілей із FastTrack** (захист у глибину до авто-kick): address-list зі списком адрес цілей + `dst-address-list=!EMG-PROTECTED` на fasttrack-правилі.
 - **pin CA для api-ssl:** `/certificate export-certificate api-ca` → `/opt/tgbot/api-ca.crt`; у `ros_connect`: `ssl.create_default_context(cafile=...)`, `check_hostname=False`, verify лишається `CERT_REQUIRED`.
 - **Авто-відновлення за таймером** (scheduler на роутері повертає `disabled=yes` через N годин).
 - **Сповіщення в окремий канал** про кожну дію (дублювання аудиту).
@@ -527,6 +566,7 @@ systemctl start tgbot && /opt/tgbot/heartbeat.sh --daily   # → ✅
 - [ ] 1.1–1.2 Сертифікат + api-ssl (обмежено `<LXC_IP>`)
 - [ ] 1.3 Користувач `tgbot` створено
 - [ ] 1.4 Вимкнені правила створено для КОЖНОЇ цілі (прапор `X`)
+- [ ] 1.5 (опційно) Цілі виключено з FastTrack через address-list `EMG-PROTECTED`
 - [ ] 1.6 `loose-tcp-tracking=no` (або зафіксовано відмову + наслідок для /kick)
 
 **Фаза 2 — LXC**
