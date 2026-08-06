@@ -161,11 +161,21 @@ add name=tgbot group=botctl password=<STRONG_PASS> address=<LXC_IP>/32 comment="
 ```
 /ip firewall filter
 add chain=forward action=drop \
-    src-address=10.10.0.0/24 dst-address=192.168.72.27 \
+    dst-address=192.168.72.27 \
     comment="EMERGENCY-BLOCK-SRV" disabled=yes place-before=0
 ```
 Друга і наступні цілі — те саме зі своїми `dst-address` і `comment` (напр. `EMG-BLOCK-SRV-FILES`).
 Перевірка: `/ip firewall filter print where comment~"EMERGENCY|EMG-"` — усі з прапором `X`.
+
+> **Свідомо без `src-address`.** Правило блокує доступ до цілі з БУДЬ-ЯКОГО джерела (LAN і всі
+> WireGuard-піри), а не лише з однієї підмережі — і це відповідає значенню `targets.json` без
+> поля `"src"` (див. Фазу 3.2): `/kick`/`/block` тоді рвуть сесії з будь-якого джерела теж.
+> Причина: `interface wireguard peers print` часто показує піри, не обмежені однією підмережею
+> (сайт-ту-сайт з іншою LAN у allowed-address, full-tunnel `0.0.0.0/0`) — вузький
+> `src-address=<підмережа-клієнтів>` залишає для таких пірів прогалину: правило й `/kick` їх
+> просто не побачать. Якщо для конкретної цілі свідомо потрібен вужчий скоуп (лише певна
+> підмережа) — додай `src-address=<підмережа>` в це правило вручну і вистав те саме значення
+> в `"src"` цілі в `targets.json`.
 
 > Авто-kick у `/block` уже гарантує миттєву дію правила, тож окреме виключення цілей із FastTrack (v1, крок 1.4a) тепер **опційний захист у глибину** — див. крок 1.5.
 
