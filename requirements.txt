@@ -1,0 +1,3 @@
+# Продакшн-залежності бота (див. RUNBOOK_universal_bot.md, п. 3.1).
+python-telegram-bot==21.*
+librouteros

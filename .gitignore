@@ -1,0 +1,33 @@
+# Секрети (RUNBOOK: BOT_TOKEN, CHR_PASS тощо) — ніколи не комітити.
+tgbot.env
+*.env
+!.env.example
+
+# Опційний pin CA для api-ssl (RUNBOOK → "Опційні покращення").
+api-ca.crt
+
+# Бекапи MikroTik, які завантажують офлайн у Фазі 0 раннбука.
+before-emg-bot*
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+
+# Віртуальні оточення
+venv/
+.venv/
+env/
+
+# Тести/тулінг
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# IDE/OS
+.vscode/
+.idea/
+.DS_Store

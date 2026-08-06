@@ -1,0 +1,3 @@
+# Залежності для розробки й тестів (запуск: pytest).
+-r requirements.txt
+pytest
