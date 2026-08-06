@@ -123,6 +123,23 @@ def _kick(api, target):
     return len(ids)
 
 
+def _wg_find(api):
+    """Знаходить інтерфейс WireGuard WG_IFACE. Повертає None і при цьому НЕ валить
+    решту команди — ні коли інтерфейсу з такою назвою просто нема, ні коли сам запит
+    впав (напр. на роутері взагалі відсутня підтримка WireGuard: не той пакет/версія
+    RouterOS). Бот мусить лишатись універсальним — відсутність однієї опційної фічі
+    конкретного роутера не має ламати решту дій (насамперед /status для інших цілей)."""
+    try:
+        for wg in api.path("interface", "wireguard"):
+            if wg.get("name") == WG_IFACE:
+                return wg
+    except Exception:
+        log.exception("не вдалося прочитати interface/wireguard "
+                      "(можливо, WireGuard недоступний на цьому роутері)")
+        return None
+    return None
+
+
 # ----------------------- Виконавці дій -----------------------
 def do_block(tname):
     """Увімкнути drop-правило + одразу розірвати активні сесії (авто-kick):
@@ -155,14 +172,14 @@ def do_kick(tname):
 
 def do_wg(disabled):
     with ros() as api:
-        for wg in api.path("interface", "wireguard"):
-            if wg.get("name") == WG_IFACE:
-                api.path("interface", "wireguard").update(
-                    **{".id": wg[".id"], "disabled": "yes" if disabled else "no"}
-                )
-                return True, ("🔴 WireGuard ВИМКНЕНО." if disabled
-                              else "🟢 WireGuard УВІМКНЕНО.")
-    return False, f"Інтерфейс '{WG_IFACE}' не знайдено."
+        wg = _wg_find(api)
+        if wg is None:
+            return False, (f"Інтерфейс '{WG_IFACE}' не знайдено (або WireGuard "
+                          "недоступний на цьому роутері).")
+        api.path("interface", "wireguard").update(
+            **{".id": wg[".id"], "disabled": "yes" if disabled else "no"}
+        )
+    return True, ("🔴 WireGuard ВИМКНЕНО." if disabled else "🟢 WireGuard УВІМКНЕНО.")
 
 
 def get_status(uid):
@@ -184,12 +201,14 @@ def get_status(uid):
                          f"{'ЗАБЛОКОВАНО' if blocked else 'доступ дозволено'}, "
                          f"активних сесій: {cnt}")
 
-        wg_line = f"⚠️ WireGuard '{WG_IFACE}': інтерфейс не знайдено"
-        for wg in api.path("interface", "wireguard"):
-            if wg.get("name") == WG_IFACE:
-                down = _is_disabled(wg.get("disabled"))
-                wg_line = (f"WireGuard '{WG_IFACE}': "
-                           + ("🔴 ВИМКНЕНО" if down else "🟢 працює"))
+        wg = _wg_find(api)
+        if wg is None:
+            wg_line = (f"⚠️ WireGuard '{WG_IFACE}': інтерфейс не знайдено "
+                      "(або WireGuard недоступний на цьому роутері)")
+        else:
+            down = _is_disabled(wg.get("disabled"))
+            wg_line = (f"WireGuard '{WG_IFACE}': "
+                       + ("🔴 ВИМКНЕНО" if down else "🟢 працює"))
     lines.append(wg_line)
     return "\n".join(lines)
 

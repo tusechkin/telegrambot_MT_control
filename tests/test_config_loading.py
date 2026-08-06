@@ -58,6 +58,17 @@ def test_rejects_bad_src_subnet(monkeypatch, tmp_path):
     assert any("некоректна підмережа" in e for e in cfg._errors)
 
 
+def test_rejects_duplicate_rule_across_targets(monkeypatch, tmp_path):
+    """Дві цілі з однаковим firewall-коментарем (rule) резолвляться в одне й те саме
+    правило на роутері — /block однієї мовчки зачепить іншу. Має ловитись на старті."""
+    targets = {
+        "srv-a": {"address": "10.0.0.1", "rule": "SAME-RULE"},
+        "srv-b": {"address": "10.0.0.2", "rule": "SAME-RULE"},
+    }
+    cfg = _reload(monkeypatch, tmp_path, targets, VALID_ACCESS)
+    assert any("однаковий" in e and "SAME-RULE" in e for e in cfg._errors)
+
+
 def test_no_valid_targets_at_all_is_an_error(monkeypatch, tmp_path):
     targets = {"bad name": {"address": "10.0.0.1", "rule": "R1"}}
     cfg = _reload(monkeypatch, tmp_path, targets, VALID_ACCESS)
