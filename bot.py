@@ -41,6 +41,14 @@ logging.basicConfig(
 )
 log = logging.getLogger("emg-bot")
 
+# httpx/httpcore (HTTP-клієнт усередині python-telegram-bot) на рівні INFO логують
+# ПОВНИЙ URL кожного запиту до Bot API — а він містить BOT_TOKEN відкритим текстом
+# (.../bot<TOKEN>/getUpdates). Разом із персистентним journald (RUNBOOK 3.4) це
+# означає, що токен осідає на диску назавжди при кожному поллінгу. Приглушуємо
+# саме ці два логери до WARNING; власний лог бота (emg-bot) лишається на INFO.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+
 ERR_TXT = "⚠️ Помилка зв'язку з роутером — деталі в лозі (journalctl -u tgbot)."
 
 
