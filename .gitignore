@@ -6,6 +6,9 @@ tgbot.env
 # Опційний pin CA для api-ssl (RUNBOOK → "Опційні покращення").
 api-ca.crt
 
+# Локальні налаштування deploy.sh (CTID контейнера, шляхи конкретного середовища).
+deploy.local.conf
+
 # Бекапи MikroTik, які завантажують офлайн у Фазі 0 раннбука.
 before-emg-bot*
 
